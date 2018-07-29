@@ -3,6 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 
 use interval_tree::{IntervalTree, range};
 
@@ -230,6 +231,7 @@ impl Ifdef {
 pub struct Preprocessor<'ctx> {
     context: &'ctx Context,
     env_file: PathBuf,
+    comments: Option<mpsc::Sender<Comment>>,
 
     include_stack: IncludeStack<'ctx>,
     last_input_loc: Location,
@@ -274,6 +276,7 @@ impl<'ctx> Preprocessor<'ctx> {
         Ok(Preprocessor {
             context,
             env_file,
+            comments: None,
             include_stack: IncludeStack {
                 stack: vec![include],
             },
@@ -290,6 +293,10 @@ impl<'ctx> Preprocessor<'ctx> {
             danger_idents: Default::default(),
             in_interp_string: 0,
         })
+    }
+
+    pub fn save_comments(&mut self, chan: mpsc::Sender<Comment>) {
+        self.comments = Some(chan);
     }
 
     /// Move all active defines to the define history.
@@ -328,6 +335,7 @@ impl<'ctx> Preprocessor<'ctx> {
 
         Preprocessor {
             context: context,
+            comments: None,
             env_file: self.env_file.clone(),
             include_stack: Default::default(),
             history: Default::default(),  // TODO: support branching a second time
@@ -552,11 +560,16 @@ impl<'ctx> Preprocessor<'ctx> {
                                 // TODO: warn if a file is double-included, and
                                 // don't include it a second time
                                 FileType::DM => match Include::from_file(self.context, candidate) {
-                                    Ok(include) => {
+                                    Ok(mut include) => {
                                         // A phantom newline keeps the include
                                         // directive being indented from making
                                         // the first line of the file indented.
                                         self.output.push_back(Token::Punct(Punctuation::Newline));
+                                        if let Include::File { ref mut lexer, .. } = include {
+                                            if let Some(ref comments) = self.comments {
+                                                lexer.save_comments(comments.clone());
+                                            }
+                                        }
                                         self.include_stack.stack.push(include);
                                     }
                                     Err(e) => self.context.register_error(DMError::new(self.last_input_loc,

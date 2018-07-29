@@ -3,6 +3,7 @@ use std::io;
 use std::str::FromStr;
 use std::fmt;
 use std::borrow::Cow;
+use std::sync::mpsc;
 
 use super::{DMError, Location, HasLocation, FileId, Context, Severity};
 
@@ -238,6 +239,13 @@ impl LocatedToken {
     }
 }
 
+#[derive(Debug)]
+pub struct Comment {
+    pub location: Location,
+    /// Includes the comment characters.
+    pub text: String,
+}
+
 fn is_digit(ch: u8) -> bool {
     ch >= b'0' && ch <= b'9'
 }
@@ -380,6 +388,7 @@ pub struct Lexer<'ctx, I> {
     at_line_head: bool,
     directive: Directive,
     interp_stack: Vec<Interpolation>,
+    comments: Option<mpsc::Sender<Comment>>,
 }
 
 impl<'ctx, I> fmt::Debug for Lexer<'ctx, I> {
@@ -421,7 +430,12 @@ impl<'ctx, I: Iterator<Item=io::Result<u8>>> Lexer<'ctx, I> {
             at_line_head: true,
             directive: Directive::None,
             interp_stack: Vec::new(),
+            comments: None,
         }
+    }
+
+    pub fn save_comments(&mut self, chan: mpsc::Sender<Comment>) {
+        self.comments = Some(chan);
     }
 
     fn next(&mut self) -> Option<u8> {
@@ -461,6 +475,11 @@ impl<'ctx, I: Iterator<Item=io::Result<u8>>> Lexer<'ctx, I> {
     fn skip_block_comments(&mut self) {
         let mut depth = 1;
         let mut buffer = [0, 0];
+        let mut comment = Comment {
+            location: self.location(),
+            text: "/*".to_owned(),
+        };
+
         while depth > 0 {
             // read one character
             buffer[0] = buffer[1];
@@ -477,11 +496,19 @@ impl<'ctx, I: Iterator<Item=io::Result<u8>>> Lexer<'ctx, I> {
             } else if buffer == *b"*/" {
                 depth -= 1;
             }
+            comment.text.push(buffer[1] as char);
+        }
+        if let Some(ref chan) = self.comments {
+            let _ = chan.send(comment).is_err();
         }
     }
 
     fn skip_line_comment(&mut self) {
         let mut backslash = false;
+        let mut comment = Comment {
+            location: self.location(),
+            text: "//".to_owned(),
+        };
         while let Some(ch) = self.next() {
             if ch == b'\r' {
                 // not listening
@@ -492,6 +519,10 @@ impl<'ctx, I: Iterator<Item=io::Result<u8>>> Lexer<'ctx, I> {
             } else if ch == b'\\' {
                 backslash = true;
             }
+            comment.text.push(ch as char);
+        }
+        if let Some(ref chan) = self.comments {
+            let _ = chan.send(comment);
         }
     }
 

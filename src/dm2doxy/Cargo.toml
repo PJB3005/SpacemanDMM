@@ -1,0 +1,12 @@
+[package]
+name = "dm2doxy"
+version = "0.0.1"
+authors = ["Tad Hardesty <tad@platymuus.com>"]
+description = "Doxygen filter for DreamMaker"
+
+[[bin]]
+name = "dm2doxy"
+path = "main.rs"
+
+[dependencies]
+dreammaker = { path = "../dreammaker" }

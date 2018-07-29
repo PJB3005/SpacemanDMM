@@ -19,6 +19,7 @@ pub fn parse<I>(context: &Context, iter: I) -> ObjectTree where
     I: IntoIterator<Item=LocatedToken>
 {
     let mut parser = Parser::new(context, iter.into_iter());
+    parser.tree.register_builtins();
     parser.run();
 
     let procs_total = parser.procs_good + parser.procs_bad;
@@ -313,7 +314,7 @@ impl TTKind {
 pub struct Parser<'ctx, 'an, I> {
     context: &'ctx Context,
     annotations: Option<&'an mut AnnotationTree>,
-    tree: ObjectTree,
+    pub tree: ObjectTree,
 
     input: I,
     eof: bool,
@@ -353,7 +354,6 @@ impl<'ctx, 'an, I> Parser<'ctx, 'an, I> where
     }
 
     pub fn run(&mut self) {
-        self.tree.register_builtins();
         let root = self.root();
         if let Err(e) = self.require(root) {
             self.context.register_error(e);
